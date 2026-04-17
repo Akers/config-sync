@@ -122,14 +122,30 @@ export async function initCommand(): Promise<void> {
   }
 
   // Step 3: Repo URL and branch
-  const remainingAnswers = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'repo_url',
-      message: 'Git repository URL:',
-      default: host.defaultUrl ? `${host.defaultUrl}<owner>/<repo>.git` : undefined,
-      validate: (input: string) => input.trim() ? true : 'Repository URL is required',
-    },
+  const isGhCli = authType === 'gh-cli';
+
+  const repoUrlPrompt = isGhCli
+    ? {
+        type: 'input' as const,
+        name: 'repo_id',
+        message: 'GitHub repository (owner/repo):',
+        validate: (input: string) => {
+          const trimmed = input.trim();
+          if (!trimmed) return 'Repository ID is required';
+          if (!trimmed.includes('/')) return 'Format: owner/repo (e.g. Akers/my-config)';
+          return true;
+        },
+      }
+    : {
+        type: 'input' as const,
+        name: 'repo_url',
+        message: 'Git repository URL:',
+        default: host.defaultUrl ? `${host.defaultUrl}<owner>/<repo>.git` : undefined,
+        validate: (input: string) => input.trim() ? true : 'Repository URL is required',
+      };
+
+  const repoAnswers = await inquirer.prompt([
+    repoUrlPrompt,
     {
       type: 'input',
       name: 'branch',
@@ -150,11 +166,14 @@ export async function initCommand(): Promise<void> {
 
   // Build provider config
   const providerType = authType === 'gh-cli' ? 'gh-cli' : 'git';
+  const repoUrl = isGhCli
+    ? `https://github.com/${(repoAnswers as any).repo_id.trim()}.git`
+    : (repoAnswers as any).repo_url.trim();
 
   const config = defaultConfig(uuidv4());
   config.provider.type = providerType;
-  config.provider.repo_url = remainingAnswers.repo_url;
-  config.provider.branch = remainingAnswers.branch;
+  config.provider.repo_url = repoUrl;
+  config.provider.branch = repoAnswers.branch;
   config.provider.auth.type = authType as 'ssh' | 'https' | 'gh-cli';
 
   // HTTPS token prompt (only for HTTPS auth)
@@ -170,14 +189,14 @@ export async function initCommand(): Promise<void> {
 
   // Set tool enabled states
   config.tools.opencode = {
-    enabled: remainingAnswers.enabled_tools.includes('opencode'),
+    enabled: repoAnswers.enabled_tools.includes('opencode'),
     enable_mcp_sync: false,
   };
   config.tools['claude-code'] = {
-    enabled: remainingAnswers.enabled_tools.includes('claude-code'),
+    enabled: repoAnswers.enabled_tools.includes('claude-code'),
   };
   config.tools['skill-sh'] = {
-    enabled: remainingAnswers.enabled_tools.includes('skill-sh'),
+    enabled: repoAnswers.enabled_tools.includes('skill-sh'),
   };
 
   saveConfig(config);
@@ -189,7 +208,7 @@ export async function initCommand(): Promise<void> {
   logger.info(`  Repo:      ${config.provider.repo_url}`);
   logger.info(`  Branch:    ${config.provider.branch}`);
   logger.info(`  Auth:      ${authType}`);
-  logger.info(`  Tools:     ${remainingAnswers.enabled_tools.join(', ')}`);
+  logger.info(`  Tools:     ${repoAnswers.enabled_tools.join(', ')}`);
   logger.info('');
   logger.info('Run ' + chalk.bold('config-sync push') + ' to upload your configs.');
 }

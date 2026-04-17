@@ -133,12 +133,21 @@ export class GitProvider implements SyncProvider {
 
     const branch = this.config!.branch || 'main';
     await this.git!.fetch('origin', branch);
-    await this.git!.checkout(branch);
 
     try {
-      await this.git!.pull('origin', branch);
+      await this.git!.checkout(branch, ['--force']);
     } catch {
-      // Might be empty repo
+      try {
+        await this.git!.checkoutBranch(branch, `origin/${branch}`);
+      } catch {
+        // Fresh repo — continue with empty workDir
+      }
+    }
+
+    try {
+      await this.git!.reset(['--hard', `origin/${branch}`]);
+    } catch {
+      // origin/<branch> may not exist
     }
 
     // Read files from workDir
@@ -177,8 +186,10 @@ export class GitProvider implements SyncProvider {
     }
 
     try {
-      // Try to checkout the remote tracking branch
-      await this.git!.checkout(branch);
+      // Try to checkout the branch, forcing a clean state.
+      // --force discards local modifications so checkout won't fail
+      // on leftover files from a previous provider session.
+      await this.git!.checkout(branch, ['--force']);
     } catch {
       // Branch doesn't exist locally yet — try to create from remote
       try {
@@ -190,9 +201,11 @@ export class GitProvider implements SyncProvider {
     }
 
     try {
-      await this.git!.pull('origin', branch);
+      // Reset to match remote exactly — handles the case where local
+      // is ahead or diverged from a previous provider session.
+      await this.git!.reset(['--hard', `origin/${branch}`]);
     } catch {
-      // Might be up-to-date or empty
+      // origin/<branch> may not exist if remote is empty
     }
 
     const manifestPath = path.join(this.workDir, 'manifest.json');
