@@ -1,0 +1,16 @@
+{
+  "model": "glm-4",
+  "env": {
+    "OPENAI_API_KEY": "sk-abc123secret",
+    "DEEPSEEK_API_KEY": "ds-xyz789secret"
+  },
+  "mcpServers": {
+    "exa": {
+      "env": {
+        "EXA_API_KEY": "exa-secret-key"
+      }
+    }
+  },
+  "plugins": ["plugin-a", "plugin-b"],
+  "theme": "dark"
+}
