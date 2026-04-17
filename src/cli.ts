@@ -21,6 +21,7 @@ program
   .description('Initialize config-sync with interactive setup')
   .action(async () => {
     await initCommand();
+    process.exit(0);
   });
 
 program
@@ -30,6 +31,7 @@ program
   .option('-f, --force', 'Force push even with conflicts')
   .action(async (options) => {
     await pushCommand(options.verbose || false, options.force || false);
+    process.exit(0);
   });
 
 program
@@ -38,6 +40,7 @@ program
   .option('-v, --verbose', 'Show detailed output')
   .action(async (options) => {
     await pullCommand(options.verbose || false);
+    process.exit(0);
   });
 
 program
@@ -46,6 +49,7 @@ program
   .option('-v, --verbose', 'Show detailed output')
   .action(async (options) => {
     await statusCommand(options.verbose || false);
+    process.exit(0);
   });
 
 program
@@ -54,6 +58,7 @@ program
   .option('-v, --verbose', 'Show detailed output')
   .action(async (file, options) => {
     await diffCommand(file, options.verbose || false);
+    process.exit(0);
   });
 
 program
@@ -61,6 +66,7 @@ program
   .description('Add a custom file to sync tracking')
   .action(async (filePath) => {
     await addCommand(filePath);
+    process.exit(0);
   });
 
 program
@@ -68,6 +74,7 @@ program
   .description('Remove a custom file from sync tracking')
   .action(async (filePath) => {
     await removeCommand(filePath);
+    process.exit(0);
   });
 
 program
@@ -75,6 +82,7 @@ program
   .description('List available sync providers')
   .action(async () => {
     await providersCommand();
+    process.exit(0);
   });
 
 program.parse();

@@ -3,8 +3,42 @@ import inquirer from 'inquirer';
 import { v4 as uuidv4 } from 'uuid';
 import { loadConfig, saveConfig, defaultConfig } from '../utils/config.js';
 import { Logger } from '../utils/logger.js';
+import { GhCliProvider } from '../providers/gh-cli-provider.js';
+import type { UserConfig } from '../types/index.js';
 
 const logger = new Logger();
+
+/** Repository hosting platform */
+type RepoHost = 'github' | 'gitlab' | 'gitea' | 'generic';
+
+interface HostConfig {
+  label: string;
+  defaultUrl: string;
+  supportsGhCli: boolean;
+}
+
+const HOSTS: Record<RepoHost, HostConfig> = {
+  github: {
+    label: 'GitHub',
+    defaultUrl: 'https://github.com/',
+    supportsGhCli: true,
+  },
+  gitlab: {
+    label: 'GitLab',
+    defaultUrl: 'https://gitlab.com/',
+    supportsGhCli: false,
+  },
+  gitea: {
+    label: 'Gitea / Forgejo',
+    defaultUrl: '',
+    supportsGhCli: false,
+  },
+  generic: {
+    label: 'Generic Git',
+    defaultUrl: '',
+    supportsGhCli: false,
+  },
+};
 
 export async function initCommand(): Promise<void> {
   logger.section('Config Sync Setup');
@@ -26,11 +60,74 @@ export async function initCommand(): Promise<void> {
     // No config yet, proceed
   }
 
-  const answers = await inquirer.prompt([
+  // Step 1: Select repository hosting type
+  const repoHostAnswer = await inquirer.prompt([{
+    type: 'list' as const,
+    name: 'repo_host',
+    message: 'Repository hosting type:',
+    choices: [
+      { name: 'GitHub', value: 'github' },
+      { name: 'GitLab', value: 'gitlab' },
+      { name: 'Gitea / Forgejo', value: 'gitea' },
+      { name: 'Generic Git', value: 'generic' },
+    ],
+  }]);
+  const repo_host = repoHostAnswer.repo_host as RepoHost;
+
+  const host = HOSTS[repo_host as RepoHost];
+
+  // Step 2: Determine authentication method based on host
+  let authType: string;
+  let ghCliChecked = false;
+
+  const authChoices: { name: string; value: string }[] = [];
+
+  if (host.supportsGhCli) {
+    // Check if gh CLI is available upfront
+    ghCliChecked = GhCliProvider.isAvailable();
+    if (ghCliChecked) {
+      authChoices.push({ name: 'GitHub CLI (gh)  — auto-authenticated', value: 'gh-cli' });
+    } else {
+      authChoices.push({ name: 'GitHub CLI (gh)  — not authenticated (run `gh auth login` first)', value: 'gh-cli' });
+    }
+  }
+
+  authChoices.push(
+    { name: 'SSH key', value: 'ssh' },
+    { name: 'HTTPS + token', value: 'https' },
+  );
+
+  const authAnswer = await inquirer.prompt([{
+    type: 'list' as const,
+    name: 'selected_auth',
+    message: 'Authentication method:',
+    choices: authChoices,
+    default: (ghCliChecked && host.supportsGhCli) ? 'gh-cli' : 'ssh',
+  }]);
+  authType = authAnswer.selected_auth;
+
+  // Warn if gh-cli selected but not authenticated
+  if (authType === 'gh-cli' && !ghCliChecked) {
+    logger.warn('Warning: gh CLI is not authenticated. Run `gh auth login` before using push/pull.');
+    const { proceed } = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'proceed',
+      message: 'Continue anyway?',
+      default: false,
+    }]);
+    if (!proceed) {
+      logger.info('Initialization cancelled.');
+      return;
+    }
+  }
+
+  // Step 3: Repo URL and branch
+  const remainingAnswers = await inquirer.prompt([
     {
       type: 'input',
       name: 'repo_url',
-      message: 'Git repository URL for config sync:',
+      message: 'Git repository URL:',
+      default: host.defaultUrl ? `${host.defaultUrl}<owner>/<repo>.git` : undefined,
       validate: (input: string) => input.trim() ? true : 'Repository URL is required',
     },
     {
@@ -38,16 +135,6 @@ export async function initCommand(): Promise<void> {
       name: 'branch',
       message: 'Branch name:',
       default: 'main',
-    },
-    {
-      type: 'list',
-      name: 'auth_type',
-      message: 'Authentication method:',
-      choices: [
-        { name: 'SSH key', value: 'ssh' },
-        { name: 'HTTPS + token', value: 'https' },
-      ],
-      default: 'ssh',
     },
     {
       type: 'checkbox',
@@ -61,30 +148,48 @@ export async function initCommand(): Promise<void> {
     },
   ]);
 
+  // Build provider config
+  const providerType = authType === 'gh-cli' ? 'gh-cli' : 'git';
+
   const config = defaultConfig(uuidv4());
-  config.provider.repo_url = answers.repo_url;
-  config.provider.branch = answers.branch;
-  config.provider.auth.type = answers.auth_type;
+  config.provider.type = providerType;
+  config.provider.repo_url = remainingAnswers.repo_url;
+  config.provider.branch = remainingAnswers.branch;
+  config.provider.auth.type = authType as 'ssh' | 'https' | 'gh-cli';
+
+  // HTTPS token prompt (only for HTTPS auth)
+  if (authType === 'https') {
+    const { token } = await inquirer.prompt([{
+      type: 'password',
+      name: 'token',
+      message: 'Personal access token:',
+      mask: '*',
+    }]);
+    config.provider.auth.token = token;
+  }
 
   // Set tool enabled states
   config.tools.opencode = {
-    enabled: answers.enabled_tools.includes('opencode'),
+    enabled: remainingAnswers.enabled_tools.includes('opencode'),
     enable_mcp_sync: false,
   };
   config.tools['claude-code'] = {
-    enabled: answers.enabled_tools.includes('claude-code'),
+    enabled: remainingAnswers.enabled_tools.includes('claude-code'),
   };
   config.tools['skill-sh'] = {
-    enabled: answers.enabled_tools.includes('skill-sh'),
+    enabled: remainingAnswers.enabled_tools.includes('skill-sh'),
   };
 
   saveConfig(config);
 
   logger.success('Configuration saved!');
-  logger.info(`  Device: ${config.device_id}`);
-  logger.info(`  Repo: ${config.provider.repo_url}`);
-  logger.info(`  Branch: ${config.provider.branch}`);
-  logger.info(`  Tools: ${answers.enabled_tools.join(', ')}`);
+  logger.info(`  Device:    ${config.device_id}`);
+  logger.info(`  Host:      ${host.label}`);
+  logger.info(`  Provider:  ${providerType}`);
+  logger.info(`  Repo:      ${config.provider.repo_url}`);
+  logger.info(`  Branch:    ${config.provider.branch}`);
+  logger.info(`  Auth:      ${authType}`);
+  logger.info(`  Tools:     ${remainingAnswers.enabled_tools.join(', ')}`);
   logger.info('');
   logger.info('Run ' + chalk.bold('config-sync push') + ' to upload your configs.');
 }

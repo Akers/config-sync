@@ -54,7 +54,7 @@ export interface ProviderConfig {
   repo_url: string;
   branch: string;
   auth: {
-    type: 'ssh' | 'https';
+    type: 'ssh' | 'https' | 'gh-cli';
     token?: string;
   };
 }

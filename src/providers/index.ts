@@ -1,10 +1,12 @@
 import type { SyncProvider } from '../types/index.js';
 import { GitProvider } from './git-provider.js';
+import { GhCliProvider } from './gh-cli-provider.js';
 
 export type { SyncProvider } from '../types/index.js';
 
 const PROVIDERS: Record<string, () => SyncProvider> = {
   git: () => new GitProvider(),
+  'gh-cli': () => new GhCliProvider(),
 };
 
 export function createProvider(type: string): SyncProvider {

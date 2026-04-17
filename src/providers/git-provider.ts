@@ -204,7 +204,19 @@ export class GitProvider implements SyncProvider {
   }
 
   async dispose(): Promise<void> {
-    this.git = null;
+    // simple-git may keep child processes / network sockets alive.
+    // Forcefully clear references so Node.js can exit cleanly.
+    if (this.git) {
+      try {
+        // simple-git doesn't expose a cleanup method, but clearing
+        // our reference allows GC to collect the underlying handles.
+        this.git = null;
+      } catch {
+        // ignore
+      }
+    }
+    this.config = null;
+    this.onProgress = undefined;
   }
 
   private ensureInitialized(): void {
